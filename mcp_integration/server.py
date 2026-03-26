@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
 Google搜索MCP服务器
+Google Search MCP server
 将搜索功能封装为工具，通过MCP协议提供服务
+Wraps search functionality as tools exposed over the MCP protocol
 """
 import asyncio
 import json
@@ -22,12 +24,15 @@ from common import logger
 
 
 # 创建MCP服务器实例
+# Create MCP server instance
 server = Server("google-search-server")
 
 
 @server.list_tools()
 async def list_tools() -> List[Tool]:
-    """注册可用的工具"""
+    """注册可用的工具
+    Register available tools
+    """
     return [
         Tool(
             name="google-search",
@@ -81,14 +86,16 @@ async def list_tools() -> List[Tool]:
 
 @server.call_tool()
 async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
-    """处理工具调用"""
+    """处理工具调用
+    Handle tool invocations
+    """
 
     try:
         if name == "google-search":
-            # 提取参数
-            query = arguments.get("query", "") # 搜索查询字符串, 必填
-            limit = arguments.get("limit", 5) # 默认返回5个结果
-            timeout = arguments.get("timeout", 30000) # 默认30秒超时
+            # 提取参数  # Extract parameters
+            query = arguments.get("query", "") # 搜索查询字符串, 必填  # Search query string, required
+            limit = arguments.get("limit", 5) # 默认返回5个结果  # Default to 5 results
+            timeout = arguments.get("timeout", 30000) # 默认30秒超时  # Default 30s timeout
 
             if not query:
                 return [TextContent(
@@ -99,6 +106,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             logger.info(f"收到搜索请求: query={query}, limit={limit}, timeout={timeout}")
 
             # 执行搜索
+            # Execute the search
             try:
                 # 使用超时控制防止无限等待
                 search_result = await asyncio.wait_for(
@@ -113,6 +121,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                 )
 
                 # 格式化结果
+                # Format results
                 result_text = f"搜索查询: {search_result.query}\n\n"
                 result_text += f"找到 {len(search_result.results)} 个结果:\n\n"
 
@@ -139,7 +148,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                 )]
 
         elif name == "get-webpage-html":
-            # 提取参数
+            # 提取参数  # Extract parameters
             query = arguments.get("query", "")
             save_to_file = arguments.get("saveToFile", False)
             output_path = arguments.get("outputPath")
@@ -153,6 +162,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             logger.info(f"收到HTML获取请求: query={query}, saveToFile={save_to_file}")
 
             # 获取HTML
+            # Fetch HTML
             try:
                 # 使用超时控制防止无限等待
                 html_result = await asyncio.wait_for(
@@ -166,6 +176,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                 )
 
                 # 格式化结果
+                # Format HTML result
                 result_text = f"HTML获取成功\n\n"
                 result_text += f"查询: {html_result.query}\n"
                 result_text += f"URL: {html_result.url}\n"
@@ -212,7 +223,9 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
 
 
 async def main():
-    """主函数"""
+    """主函数
+    Main entrypoint for the MCP server
+    """
     # 设置信号处理
     def signal_handler(signum, frame):
         logger.info("收到退出信号，正在关闭服务器...")
@@ -221,7 +234,7 @@ async def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    logger.info("启动Google搜索MCP服务器...")
+    logger.info("启动Google搜索MCP服务器...")  # Starting Google Search MCP server...
 
     # 启动服务器
     async with stdio_server() as (read_stream, write_stream):

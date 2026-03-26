@@ -1,5 +1,6 @@
 """
 工具函数模块
+Utility helper functions module
 """
 import platform
 import asyncio
@@ -8,22 +9,30 @@ from common import logger
 
 
 def is_windows() -> bool:
-    """检查是否为 Windows 系统"""
+    """检查是否为 Windows 系统
+    Check whether the OS is Windows
+    """
     return platform.system().lower() == "windows"
 
 
 def is_macos() -> bool:
-    """检查是否为 macOS 系统"""
+    """检查是否为 macOS 系统
+    Check whether the OS is macOS
+    """
     return platform.system().lower() == "darwin"
 
 
 def is_linux() -> bool:
-    """检查是否为 Linux 系统"""
+    """检查是否为 Linux 系统
+    Check whether the OS is Linux
+    """
     return platform.system().lower() == "linux"
 
 
 def get_platform_info() -> str:
-    """获取平台信息"""
+    """获取平台信息
+    Return a human-readable platform name
+    """
     system = platform.system().lower()
     if system == "windows":
         return "Windows"
@@ -36,7 +45,9 @@ def get_platform_info() -> str:
 
 
 async def safe_close_browser(browser, browser_name: str = "浏览器") -> None:
-    """安全关闭浏览器，处理不同平台的资源清理问题"""
+    """安全关闭浏览器，处理不同平台的资源清理问题
+    Safely close a browser instance handling platform-specific cleanup errors
+    """
     try:
         logger.info(f"正在关闭{browser_name}...")
         await browser.close()
@@ -61,7 +72,9 @@ async def safe_close_browser(browser, browser_name: str = "浏览器") -> None:
 
 
 async def safe_stop_playwright(playwright_instance, instance_name: str = "Playwright") -> None:
-    """安全停止 Playwright，处理不同平台的资源清理问题"""
+    """安全停止 Playwright，处理不同平台的资源清理问题
+    Safely stop the Playwright driver handling platform-specific cleanup
+    """
     try:
         await playwright_instance.stop()
         logger.info(f"{instance_name}已成功停止")
@@ -85,7 +98,9 @@ async def safe_stop_playwright(playwright_instance, instance_name: str = "Playwr
 
 
 async def safe_close_context(context, context_name: str = "浏览器上下文") -> None:
-    """安全关闭浏览器上下文"""
+    """安全关闭浏览器上下文
+    Safely close a browser context
+    """
     try:
         await context.close()
         logger.info(f"{context_name}已成功关闭")
@@ -94,7 +109,9 @@ async def safe_close_context(context, context_name: str = "浏览器上下文") 
 
 
 async def safe_close_page(page, page_name: str = "页面") -> None:
-    """安全关闭页面"""
+    """安全关闭页面
+    Safely close a page
+    """
     try:
         await page.close()
         logger.info(f"{page_name}已成功关闭")
@@ -103,7 +120,9 @@ async def safe_close_page(page, page_name: str = "页面") -> None:
 
 
 def suppress_platform_resource_warnings():
-    """抑制不同平台上的资源清理警告"""
+    """抑制不同平台上的资源清理警告
+    Suppress common platform-specific resource warnings (ResourceWarning)
+    """
     import warnings
     import sys
     import os
