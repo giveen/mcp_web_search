@@ -168,8 +168,8 @@ class SearchExecutor:
                 raise Exception("所有搜索执行方式都遇到了人机验证页面")
             else:
                 raise Exception("所有搜索执行方式都失败了")
-        
-                logger.info("搜索执行完成，等待页面加载  (Search execution finished; waiting for page load)")
+
+        logger.info("搜索执行完成，等待页面加载  (Search execution finished; waiting for page load)")
         return True
 
     async def wait_for_search_results(self, page: Page, timeout: int, basic_view: bool = False) -> bool:
