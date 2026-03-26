@@ -1,6 +1,7 @@
 import json
 import asyncio
 import os
+import sys
 import random
 import time
 from typing import Optional
@@ -38,7 +39,7 @@ class EnhancedMCPClient:
         
     async def connect_to_server(self):
         server_params = StdioServerParameters(
-            command='python',
+            command=sys.executable,
             args=['-m', 'mcp_integration.server'], # 修正了启动命令  # Fixed startup command
             env=None
         )

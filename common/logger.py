@@ -110,7 +110,7 @@ def signal_handler(signum, frame):
     Signal handler for graceful shutdown
     """
     logger = logging.getLogger("google_search")
-    logger.info("进程退出，日志关闭")
+    logger.info("进程退出，日志关闭  (Process exiting, closing logs)")
     sys.exit(0)
 
 

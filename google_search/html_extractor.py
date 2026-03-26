@@ -38,7 +38,7 @@ class HtmlExtractor:
         """
         async with async_playwright() as p:
             # 初始化浏览器，添加更多参数以避免检测
-                # 初始化浏览器，添加更多参数以避免检测  # Initialize browser with extra args to reduce detection
+            # Initialize browser with extra args to reduce detection
             browser = await p.chromium.launch(
                 headless=True,  # 总是以无头模式启动
                 timeout=timeout * 2,  # 增加浏览器启动超时时间
@@ -71,7 +71,7 @@ class HtmlExtractor:
                 ]
             )
             
-            logger.info("浏览器已成功启动!")  # Browser started successfully!
+            logger.info("浏览器已成功启动!  (Browser started successfully!)")  # Browser started successfully!
             
             try:
                 # 这里实现获取HTML的具体逻辑（简化版本）
@@ -83,14 +83,14 @@ class HtmlExtractor:
                 # Use saved Google domain if available, otherwise pick randomly  # Use saved Google domain if present; otherwise choose randomly
                 if saved_state.google_domain:
                     selected_domain = saved_state.google_domain
-                    logger.info(f"使用保存的Google域名: {selected_domain}")
+                    logger.info(f"使用保存的Google域名: {selected_domain}  (Using saved Google domain: {selected_domain})")
                 else:
                     import random
                     selected_domain = random.choice(self.google_domains)
                     saved_state.google_domain = selected_domain
-                    logger.info(f"随机选择Google域名: {selected_domain}")
+                    logger.info(f"随机选择Google域名: {selected_domain}  (Randomly selected Google domain: {selected_domain})")
                 
-                logger.info("正在访问Google搜索页面...")  # Navigating to Google search page...
+                logger.info("正在访问Google搜索页面...  (Navigating to Google search page)")  # Navigating to Google search page...
                 
                 # 访问Google搜索页面
                 await page.goto(selected_domain, timeout=timeout, wait_until="networkidle")
@@ -103,17 +103,17 @@ class HtmlExtractor:
                 await page.wait_for_timeout(get_random_delay(100, 300))
                 await page.keyboard.press("Enter")
                 
-                logger.info("正在等待搜索结果页面加载完成...")
+                logger.info("正在等待搜索结果页面加载完成...  (Waiting for search results page to load)")
                 
                 # 等待页面加载完成
                 await page.wait_for_load_state("networkidle", timeout=timeout)
                 
                 # 获取当前页面URL
                 final_url = page.url
-                logger.info(f"搜索结果页面已加载，准备提取HTML: {final_url}")  # Search results page loaded; preparing to extract HTML
+                logger.info(f"搜索结果页面已加载，准备提取HTML: {final_url}  (Search results page loaded; preparing to extract HTML: {final_url})")  # Search results page loaded; preparing to extract HTML
                 
                 # 添加额外的等待时间，确保页面完全加载和稳定
-                logger.info("等待页面稳定...")  # Waiting for the page to stabilize...
+                logger.info("等待页面稳定...  (Waiting for the page to stabilize)")  # Waiting for the page to stabilize...
                 await page.wait_for_timeout(1000)  # 等待1秒，让页面完全稳定  # Wait 1s to ensure stability
                 
                 # 再次等待网络空闲，确保所有异步操作完成
@@ -129,7 +129,7 @@ class HtmlExtractor:
                 html = re.sub(r'<link\s+[^>]*rel=["\']stylesheet["\'][^>]*>', '', html, flags=re.IGNORECASE)
                 html = re.sub(r'<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>', '', html, flags=re.IGNORECASE)
                 
-                logger.info(f"成功获取并清理页面HTML内容: originalLength={len(full_html)}, cleanedLength={len(html)}")  # Successfully fetched and cleaned page HTML
+                logger.info(f"成功获取并清理页面HTML内容: originalLength={len(full_html)}, cleanedLength={len(html)}  (Successfully fetched and cleaned page HTML; originalLength={len(full_html)}, cleanedLength={len(html)})")  # Successfully fetched and cleaned page HTML
                 
                 # 如果需要，将HTML保存到文件并截图
                 saved_file_path = None
@@ -174,24 +174,24 @@ class HtmlExtractor:
                     with open(output_path, 'w', encoding='utf-8') as f:
                         f.write(html)
                     saved_file_path = str(output_path)
-                    logger.info(f"清理后的HTML内容已保存到文件: {output_path}")  # Cleaned HTML saved to file
+                    logger.info(f"清理后的HTML内容已保存到文件: {output_path}  (Cleaned HTML saved to file: {output_path})")  # Cleaned HTML saved to file
                     
                     # 保存网页截图
                     # Save a screenshot of the page  # Save a screenshot for later inspection
                     screenshot_file_path = str(output_path).replace('.html', '.png')
                     
                     # 截取整个页面的截图
-                    logger.info("正在截取网页截图...")  # Capturing a screenshot of the page...
+                    logger.info("正在截取网页截图...  (Capturing a screenshot of the page)")  # Capturing a screenshot of the page...
                     await page.screenshot(path=screenshot_file_path, full_page=True)
                     
                     screenshot_path = screenshot_file_path
-                    logger.info(f"网页截图已保存: {screenshot_file_path}")  # Screenshot saved
+                    logger.info(f"网页截图已保存: {screenshot_file_path}  (Screenshot saved: {screenshot_file_path})")  # Screenshot saved
                 
                 try:
                     # 保存浏览器状态（除非用户指定了不保存）
                     # Save browser storage state unless user disabled it
                     if not no_save_state:
-                        logger.info(f"正在保存浏览器状态: {state_file}")
+                        logger.info(f"正在保存浏览器状态: {state_file}  (Saving browser state: {state_file})")
                         
                         # 确保目录存在
                         state_dir = Path(state_file).parent
@@ -199,7 +199,7 @@ class HtmlExtractor:
                         
                         # 保存状态
                         await context.storage_state(path=state_file)
-                        logger.info("浏览器状态保存成功!")  # Browser storage state saved successfully
+                        logger.info("浏览器状态保存成功!  (Browser storage state saved successfully)")  # Browser storage state saved successfully
                         
                         # 保存指纹配置
                         # Save fingerprint configuration  # Persist fingerprint configuration for future runs
@@ -217,13 +217,13 @@ class HtmlExtractor:
                             }
                             with open(fingerprint_file, 'w', encoding='utf-8') as f:
                                 json.dump(fingerprint_data, f, indent=2, ensure_ascii=False)
-                            logger.info(f"指纹配置已保存: {fingerprint_file}")  # Fingerprint configuration saved
+                            logger.info(f"指纹配置已保存: {fingerprint_file}  (Fingerprint configuration saved: {fingerprint_file})")  # Fingerprint configuration saved
                         except Exception as fingerprint_error:
-                            logger.error(f"保存指纹配置时发生错误: {fingerprint_error}")
+                            logger.error(f"保存指纹配置时发生错误: {fingerprint_error}  (Error while saving fingerprint configuration: {fingerprint_error})")
                     else:
-                        logger.info("根据用户设置，不保存浏览器状态")
+                        logger.info("根据用户设置，不保存浏览器状态  (Not saving browser state per user setting)")
                 except Exception as error:
-                    logger.error(f"保存浏览器状态时发生错误: {error}")
+                    logger.error(f"保存浏览器状态时发生错误: {error}  (Error while saving browser state: {error})")
                 
                 # 返回HTML响应
                 # Return the HTML response object  # Return an HtmlResponse containing the cleaned HTML and metadata
@@ -237,12 +237,12 @@ class HtmlExtractor:
                 )
                 
             except Exception as error:
-                logger.error(f"获取页面HTML过程中发生错误: {error}")  # Error occurred while fetching page HTML
+                logger.error(f"获取页面HTML过程中发生错误: {error}  (Error occurred while fetching page HTML: {error})")  # Error occurred while fetching page HTML
                 
                 # 返回错误信息
                 # Raise an exception indicating failure to fetch HTML
                 raise Exception(f"获取Google搜索页面HTML失败: {str(error)}")
             finally:
                 # 关闭浏览器
-                logger.info("正在关闭浏览器...")  # Closing browser...
+                logger.info("正在关闭浏览器...  (Closing browser)")  # Closing browser...
                 await browser.close()

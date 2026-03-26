@@ -10,6 +10,7 @@ import json
 import os
 import signal
 import sys
+import time
 
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -26,6 +27,12 @@ from common import logger
 # 创建MCP服务器实例
 # Create MCP server instance
 server = Server("google-search-server")
+
+# Cooldown tracking to avoid rapid repeated searches after CAPTCHA
+# Timestamp (epoch seconds) of last detected CAPTCHA
+_last_captcha_time: float = 0.0
+# Cooldown window in seconds (configurable)
+_captcha_cooldown_seconds: int = int(os.getenv("MCP_CAPTCHA_COOLDOWN", "90"))
 
 
 @server.list_tools()
@@ -91,10 +98,21 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
     """
 
     try:
+        # Ensure we can update the module-level CAPTCHA timestamp
+        global _last_captcha_time
         if name == "google-search":
+            # Enforce cooldown after recent CAPTCHA to let IP "heat" dissipate
+            now_ts = time.time()
+            if _last_captcha_time and (now_ts - _last_captcha_time) < _captcha_cooldown_seconds:
+                wait_remain = int(_captcha_cooldown_seconds - (now_ts - _last_captcha_time))
+                return [TextContent(
+                    type="text",
+                    text=f"Refusing search: recent CAPTCHA detected. Please wait {wait_remain}s before retrying."
+                )]
+
             # 提取参数  # Extract parameters
             query = arguments.get("query", "") # 搜索查询字符串, 必填  # Search query string, required
-            limit = arguments.get("limit", 5) # 默认返回5个结果  # Default to 5 results
+            limit = arguments.get("limit", 10) # 默认返回10个结果  # Default to 10 results
             timeout = arguments.get("timeout", 30000) # 默认30秒超时  # Default 30s timeout
 
             if not query:
@@ -129,6 +147,11 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                     result_text += f"{i}. {result.title}\n"
                     result_text += f"   链接: {result.link}\n"
                     result_text += f"   摘要: {result.snippet}\n\n"
+
+                # If the search result indicates a CAPTCHA failure, record the time so subsequent requests are cooled down
+                if search_result.results and len(search_result.results) > 0 and search_result.results[0].title.startswith("Search failed (CAPTCHA)"):
+                    # record last captcha time at module scope
+                    _last_captcha_time = time.time()
 
                 return [TextContent(
                     type="text",
@@ -228,13 +251,13 @@ async def main():
     """
     # 设置信号处理
     def signal_handler(signum, frame):
-        logger.info("收到退出信号，正在关闭服务器...")
+        logger.info("收到退出信号，正在关闭服务器...  (Shutdown signal received; closing server)")
         sys.exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    logger.info("启动Google搜索MCP服务器...")  # Starting Google Search MCP server...
+    logger.info("启动Google搜索MCP服务器...  (Starting Google Search MCP server)")  # Starting Google Search MCP server...
 
     # 启动服务器
     async with stdio_server() as (read_stream, write_stream):

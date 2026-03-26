@@ -49,26 +49,25 @@ async def safe_close_browser(browser, browser_name: str = "浏览器") -> None:
     Safely close a browser instance handling platform-specific cleanup errors
     """
     try:
-        logger.info(f"正在关闭{browser_name}...")
+        logger.info(f"正在关闭{browser_name}...  (Closing {browser_name}...)")
         await browser.close()
-        logger.info(f"{browser_name}已成功关闭")
+        logger.info(f"{browser_name}已成功关闭  ({browser_name} closed successfully)")
     except Exception as e:
         error_msg = str(e).lower()
         platform = get_platform_info()
-        
         # 根据不同平台处理不同类型的错误
         if is_windows() and ("pipe" in error_msg or "closed" in error_msg):
             # Windows 上的管道关闭错误，这是正常的，不需要警告
-            logger.debug(f"Windows 系统上的正常资源清理: {e}")
+            logger.debug(f"Windows 系统上的正常资源清理: {e}  (Normal resource cleanup on Windows: {e})")
         elif is_macos() and ("bad file descriptor" in error_msg or "connection reset" in error_msg):
             # macOS 上的文件描述符错误，通常是正常的
-            logger.debug(f"macOS 系统上的正常资源清理: {e}")
+            logger.debug(f"macOS 系统上的正常资源清理: {e}  (Normal resource cleanup on macOS: {e})")
         elif is_linux() and ("broken pipe" in error_msg or "connection reset" in error_msg):
             # Linux 上的管道错误，通常是正常的
-            logger.debug(f"Linux 系统上的正常资源清理: {e}")
+            logger.debug(f"Linux 系统上的正常资源清理: {e}  (Normal resource cleanup on Linux: {e})")
         else:
             # 其他错误需要警告
-            logger.warn(f"关闭{browser_name}时发生错误: {e}")
+            logger.warn(f"关闭{browser_name}时发生错误: {e}  (Error closing {browser_name}: {e})")
 
 
 async def safe_stop_playwright(playwright_instance, instance_name: str = "Playwright") -> None:
@@ -77,24 +76,23 @@ async def safe_stop_playwright(playwright_instance, instance_name: str = "Playwr
     """
     try:
         await playwright_instance.stop()
-        logger.info(f"{instance_name}已成功停止")
+        logger.info(f"{instance_name}已成功停止  ({instance_name} stopped successfully)")
     except Exception as e:
         error_msg = str(e).lower()
         platform = get_platform_info()
-        
         # 根据不同平台处理不同类型的错误
         if is_windows() and ("pipe" in error_msg or "closed" in error_msg):
             # Windows 上的管道关闭错误，这是正常的，不需要警告
-            logger.debug(f"Windows 系统上的正常资源清理: {e}")
+            logger.debug(f"Windows 系统上的正常资源清理: {e}  (Normal resource cleanup on Windows: {e})")
         elif is_macos() and ("bad file descriptor" in error_msg or "connection reset" in error_msg):
             # macOS 上的文件描述符错误，通常是正常的
-            logger.debug(f"macOS 系统上的正常资源清理: {e}")
+            logger.debug(f"macOS 系统上的正常资源清理: {e}  (Normal resource cleanup on macOS: {e})")
         elif is_linux() and ("broken pipe" in error_msg or "connection reset" in error_msg):
             # Linux 上的管道错误，通常是正常的
-            logger.debug(f"Linux 系统上的正常资源清理: {e}")
+            logger.debug(f"Linux 系统上的正常资源清理: {e}  (Normal resource cleanup on Linux: {e})")
         else:
             # 其他错误需要警告
-            logger.warn(f"停止{instance_name}时发生错误: {e}")
+            logger.warn(f"停止{instance_name}时发生错误: {e}  (Error stopping {instance_name}: {e})")
 
 
 async def safe_close_context(context, context_name: str = "浏览器上下文") -> None:
@@ -103,9 +101,9 @@ async def safe_close_context(context, context_name: str = "浏览器上下文") 
     """
     try:
         await context.close()
-        logger.info(f"{context_name}已成功关闭")
+        logger.info(f"{context_name}已成功关闭  ({context_name} closed successfully)")
     except Exception as e:
-        logger.warn(f"关闭{context_name}时发生错误: {e}")
+        logger.warn(f"关闭{context_name}时发生错误: {e}  (Error closing {context_name}: {e})")
 
 
 async def safe_close_page(page, page_name: str = "页面") -> None:
@@ -114,9 +112,9 @@ async def safe_close_page(page, page_name: str = "页面") -> None:
     """
     try:
         await page.close()
-        logger.info(f"{page_name}已成功关闭")
+        logger.info(f"{page_name}已成功关闭  ({page_name} closed successfully)")
     except Exception as e:
-        logger.warn(f"关闭{page_name}时发生错误: {e}")
+        logger.warn(f"关闭{page_name}时发生错误: {e}  (Error closing {page_name}: {e})")
 
 
 def suppress_platform_resource_warnings():
@@ -128,7 +126,7 @@ def suppress_platform_resource_warnings():
     import os
     
     platform = get_platform_info()
-    logger.debug(f"当前平台: {platform}")
+    logger.debug(f"当前平台: {platform}  (Current platform: {platform})")
     
     if is_windows():
         # Windows 特有的警告抑制
@@ -142,7 +140,7 @@ def suppress_platform_resource_warnings():
             message=".*unclosed.*", 
             category=ResourceWarning
         )
-        logger.debug("已抑制 Windows 管道关闭警告")
+        logger.debug("已抑制 Windows 管道关闭警告  (Suppressed Windows pipe-closed warnings)")
         
     elif is_macos():
         # macOS 特有的警告抑制
@@ -156,7 +154,7 @@ def suppress_platform_resource_warnings():
             message=".*unclosed.*", 
             category=ResourceWarning
         )
-        logger.debug("已抑制 macOS 文件描述符警告")
+        logger.debug("已抑制 macOS 文件描述符警告  (Suppressed macOS file-descriptor warnings)")
         
     elif is_linux():
         # Linux 特有的警告抑制
@@ -170,7 +168,7 @@ def suppress_platform_resource_warnings():
             message=".*unclosed.*", 
             category=ResourceWarning
         )
-        logger.debug("已抑制 Linux 管道错误警告")
+        logger.debug("已抑制 Linux 管道错误警告  (Suppressed Linux pipe error warnings)")
     
     # 通用的资源警告抑制（适用于所有平台）
     warnings.filterwarnings(
@@ -209,6 +207,6 @@ def suppress_platform_resource_warnings():
             asyncio.proactor_events._ProactorBasePipeTransport.__del__ = safe_del
             asyncio.base_subprocess.BaseSubprocessTransport.__del__ = safe_del
             
-            logger.debug("已应用 Windows 管道错误猴子补丁")
+            logger.debug("已应用 Windows 管道错误猴子补丁  (Applied Windows pipe-error monkeypatch)")
         except Exception as e:
-            logger.debug(f"应用猴子补丁失败: {e}") 
+            logger.debug(f"应用猴子补丁失败: {e}  (Failed to apply monkeypatch: {e})")
