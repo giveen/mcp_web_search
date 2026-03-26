@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 基于 Playwright 的 Google 搜索 CLI 工具
+Google search CLI tool based on Playwright
 """
 import argparse
 import asyncio
@@ -14,20 +15,25 @@ from common import logger
 
 
 # 获取版本信息
+# Get version information
 def get_version():
-    """获取版本信息"""
+    """获取版本信息
+    Get version information
+    """
     return "1.0.0"
 
 
 async def main():
-    """主函数"""
-    # 创建命令行解析器
+    """主函数
+    Main entrypoint
+    """
+    # 创建命令行解析器  # Create argument parser
     parser = argparse.ArgumentParser(
         prog="google-search-cli",
         description="基于 Playwright 的 Google 搜索 CLI 工具"
     )
 
-    # 配置命令行选项
+    # 配置命令行选项  # Configure command line options
     parser.add_argument(
         "query",
         help="搜索关键词"
@@ -79,12 +85,12 @@ async def main():
         version=f"%(prog)s {get_version()}"
     )
 
-    # 解析命令行参数
+    # 解析命令行参数  # Parse command line arguments
     args = parser.parse_args()
 
     try:
         if args.get_html:
-            # 获取HTML
+            # 获取HTML  # Get HTML
             html_result = await get_google_search_page_html(
                 args.query,
                 CommandOptions(
@@ -97,7 +103,7 @@ async def main():
                 args.html_output
             )
 
-            # 输出HTML结果
+            # 输出HTML结果  # Print HTML result
             print(json.dumps({
                 "query": html_result.query,
                 "url": html_result.url,
@@ -111,7 +117,7 @@ async def main():
                 if html_result.screenshot_path:
                     print(f"截图已保存到: {html_result.screenshot_path}")
         else:
-            # 执行搜索
+            # 执行搜索  # Execute search
             search_result = await google_search(
                 args.query,
                 CommandOptions(
@@ -122,7 +128,7 @@ async def main():
                 )
             )
 
-            # 输出搜索结果
+            # 输出搜索结果  # Print search results
             print(json.dumps({
                 "query": search_result.query,
                 "results": [

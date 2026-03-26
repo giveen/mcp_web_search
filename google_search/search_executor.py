@@ -1,5 +1,6 @@
 """
 搜索执行模块
+Search execution module
 """
 import random
 from typing import List, Dict, Any
@@ -11,10 +12,12 @@ from .fingerprint import get_random_delay
 
 
 class SearchExecutor:
-    """搜索执行器"""
+    """搜索执行器
+    Search executor
+    """
     
     def __init__(self):
-        # 人机验证页面模式
+        # 人机验证页面模式  # CAPTCHA/anti-bot page patterns
         self.sorry_patterns = [
             "google.com/sorry/index",
             "google.com/sorry",
@@ -23,7 +26,7 @@ class SearchExecutor:
             "unusual traffic"
         ]
         
-        # 搜索框选择器
+        # 搜索框选择器  # Search input selectors
         self.search_input_selectors = [
             "textarea[name='q']",
             "input[name='q']",
@@ -34,7 +37,7 @@ class SearchExecutor:
             "textarea"
         ]
         
-        # 搜索结果选择器
+        # 搜索结果选择器  # Search result selectors
         self.search_result_selectors = [
             "#search",
             "#rso",
@@ -44,7 +47,9 @@ class SearchExecutor:
         ]
     
     def is_blocked_page(self, url: str, response_url: str = None) -> bool:
-        """检查是否被重定向到人机验证页面"""
+        """检查是否被重定向到人机验证页面
+        Check whether the URL indicates a CAPTCHA/verification page
+        """
         return any(
             pattern in url or
             (response_url and pattern in response_url)
@@ -52,7 +57,9 @@ class SearchExecutor:
         )
     
     async def execute_search(self, page: Page, query: str) -> bool:
-        """执行搜索"""
+        """执行搜索
+        Execute a search on the given page
+        """
         logger.info(f"正在输入搜索关键词: {query}")
         
         # 等待搜索框出现 - 尝试多个可能的选择器
@@ -166,7 +173,9 @@ class SearchExecutor:
         return True
     
     async def wait_for_search_results(self, page: Page, timeout: int) -> bool:
-        """等待搜索结果加载"""
+        """等待搜索结果加载
+        Wait for search results to appear using progressive timeouts
+        """
         logger.info(f"正在等待搜索结果加载... URL: {page.url}")
         
         results_found = False
@@ -228,7 +237,9 @@ class SearchExecutor:
         return True
     
     async def extract_search_results(self, page: Page, limit: int) -> List[Dict[str, Any]]:
-        """提取搜索结果"""
+        """提取搜索结果
+        Extract raw search results from the page (ported logic)
+        """
         # 提取搜索结果 - 使用移植自 google-search-extractor.cjs 的逻辑
         results = await page.evaluate("""
             (maxResults) => {
@@ -365,7 +376,9 @@ class SearchExecutor:
         return results
     
     def convert_to_search_results(self, raw_results: List[Dict[str, Any]]) -> List[SearchResult]:
-        """将原始结果转换为SearchResult对象"""
+        """将原始结果转换为SearchResult对象
+        Convert raw result dictionaries into a list of `SearchResult` dataclass instances
+        """
         return [
             SearchResult(title=result['title'], link=result['link'], snippet=result['snippet'])
             for result in raw_results

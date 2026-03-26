@@ -20,6 +20,7 @@ class EnhancedMCPClient:
         self.exit_stack = AsyncExitStack()
         
         # 反爬虫保护设置
+        # Anti-bot protection settings
         self.last_tool_call_time = 0
         self.min_call_interval = 3  # 最小调用间隔（秒）
         self.max_call_interval = 8  # 最大调用间隔（秒）
@@ -38,11 +39,12 @@ class EnhancedMCPClient:
     async def connect_to_server(self):
         server_params = StdioServerParameters(
             command='python',
-            args=['-m', 'mcp_integration.server'], # 修正了启动命令
+            args=['-m', 'mcp_integration.server'], # 修正了启动命令  # Fixed startup command
             env=None
         )
 
         # 使用与 client.py 相同的方式
+        # Use same stdio client setup as client.py
         self.stdio_transport = await self.exit_stack.enter_async_context(
             stdio_client(server_params))
         
@@ -65,12 +67,15 @@ class EnhancedMCPClient:
         print("✅ 已连接到Google搜索MCP服务器 / Connected to Google Search MCP Server")
         
     async def anti_bot_protection(self):
-        """反爬虫保护：在工具调用之间添加随机延迟"""
+        """反爬虫保护：在工具调用之间添加随机延迟
+        Anti-bot protection: add randomized delay between tool calls
+        """
         current_time = time.time()
         time_since_last_call = current_time - self.last_tool_call_time
         
         if time_since_last_call < self.min_call_interval:
             # 如果距离上次调用时间太短，等待随机时间
+            # If last call was too recent, wait a randomized interval
             wait_time = random.uniform(self.min_call_interval, self.max_call_interval)
             print(f"🛡️ 反爬虫保护：等待 {wait_time:.1f} 秒... / Anti-bot protection: Waiting {wait_time:.1f} seconds...")
             await asyncio.sleep(wait_time)
@@ -79,6 +84,7 @@ class EnhancedMCPClient:
         
     async def process_query(self, query: str) -> str:
         # 增强的系统提示，明确允许使用搜索工具
+        # Enhanced system prompt that explicitly allows using the search tool
         system_prompt = (
             "You are an AI assistant with access to a real-time web search tool. "
             "When a user asks a question that may require up-to-date, current, or web-based information, "
@@ -97,6 +103,7 @@ class EnhancedMCPClient:
         ]
 
         # 获取所有 mcp 服务器 工具列表信息
+        # List available tools from the MCP server
         response = await self.session.list_tools()
         print(f"🔧 可用工具: {[tool.name for tool in response.tools]} / Available tools: {[tool.name for tool in response.tools]}")
         
@@ -212,7 +219,9 @@ class EnhancedMCPClient:
                 traceback.print_exc()
 
     async def cleanup(self):
-        """Clean up resources"""
+        """Clean up resources
+        清理资源
+        """
         await self.exit_stack.aclose()
 
 async def main():
