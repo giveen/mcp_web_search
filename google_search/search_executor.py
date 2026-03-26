@@ -179,9 +179,6 @@ class SearchExecutor:
         Supports `basic_view` where the page is static and we look for simpler containers.
         """
         logger.info(f"正在等待搜索结果加载... URL: {page.url} (basic_view={basic_view})  (Waiting for search results to load)")
-        """等待搜索结果加载
-        Wait for search results to appear using progressive timeouts
-        """
         # (continued) main logic below
         
         results_found = False
