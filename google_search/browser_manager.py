@@ -51,6 +51,7 @@ from playwright.async_api import (
 from common.types import SavedState, FingerprintConfig
 from common import logger
 from .fingerprint import get_host_machine_config, get_device_config, playwright_devices
+from .utils import safe_stop_playwright
 
 
 def _detect_locale_timezone(user_locale: Optional[str] = None) -> Tuple[str, str]:
@@ -257,7 +258,11 @@ class BrowserManager:
                     **ctx_kwargs,
                 )
             else:
-                # Re-raise unexpected errors
+                # Re-raise unexpected errors but ensure Playwright is stopped to avoid leaking the driver process
+                try:
+                    await safe_stop_playwright(p)
+                except Exception:
+                    pass
                 raise
 
         # Apply stealth/init scripts to context (overrides navigator, chrome, outerWidth/Height, etc.)  # 应用隐身/初始化脚本到上下文（覆盖 navigator、chrome、outerWidth/Height 等）
