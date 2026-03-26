@@ -60,7 +60,7 @@ class SearchExecutor:
         """执行搜索
         Execute a search on the given page
         """
-        logger.info(f"正在输入搜索关键词: {query}")
+        logger.info(f"正在输入搜索关键词: {query}  (Typing search query: {query})")
         
         # 等待搜索框出现 - 尝试多个可能的选择器
         search_input = None
@@ -68,13 +68,13 @@ class SearchExecutor:
             try:
                 search_input = await page.wait_for_selector(selector, timeout=5000)
                 if search_input:
-                    logger.info(f"找到搜索框: {selector}")
+                    logger.info(f"找到搜索框: {selector}  (Found search input: {selector})")
                     break
             except:
                 continue
         
         if not search_input:
-            logger.error("无法找到搜索框")
+            logger.error("无法找到搜索框 (Unable to find search input)")
             raise Exception("无法找到搜索框")
         
         # 直接点击搜索框，减少延迟
@@ -97,26 +97,26 @@ class SearchExecutor:
         
         # 方式1：按回车键
         try:
-            logger.info("尝试方式1：按回车键执行搜索")
+            logger.info("尝试方式1：按回车键执行搜索  (Attempting method 1: press Enter)")
             await page.keyboard.press("Enter")
             await page.wait_for_load_state("domcontentloaded", timeout=15000)
             
             # 检查是否被重定向到人机验证页面
             current_url = page.url
             if self.is_blocked_page(current_url):
-                logger.warn("方式1执行后检测到人机验证页面，尝试方式2")
+                logger.warn("方式1执行后检测到人机验证页面，尝试方式2  (Method 1 hit CAPTCHA, trying method 2)")
                 search_executed = False
             else:
-                logger.info("回车键搜索执行完成")
+                logger.info("回车键搜索执行完成  (Enter-key search executed)")
                 search_executed = True
         except Exception as e:
-            logger.warn(f"回车键搜索失败，尝试其他方式: {e}")
+            logger.warn(f"回车键搜索失败，尝试其他方式: {e}  (Enter-key search failed, trying alternatives)")
             search_executed = False
         
         # 方式2：如果回车失败或被重定向，尝试点击搜索按钮
         if not search_executed:
             try:
-                logger.info("尝试方式2：点击搜索按钮")
+                logger.info("尝试方式2：点击搜索按钮  (Attempting method 2: click search button)")
                 search_button = await page.query_selector('input[type="submit"], button[type="submit"], .gNO89b, .Tg7LZd')
                 if search_button:
                     await search_button.click()
@@ -125,22 +125,22 @@ class SearchExecutor:
                     # 再次检查是否被重定向
                     current_url = page.url
                     if self.is_blocked_page(current_url):
-                        logger.warn("方式2执行后检测到人机验证页面，尝试方式3")
+                        logger.warn("方式2执行后检测到人机验证页面，尝试方式3  (Method 2 hit CAPTCHA, trying method 3)")
                         search_executed = False
                     else:
-                        logger.info("搜索按钮点击完成")
+                        logger.info("搜索按钮点击完成  (Search button click completed)")
                         search_executed = True
                 else:
-                    logger.warn("未找到搜索按钮")
+                    logger.warn("未找到搜索按钮  (Search button not found)")
                     search_executed = False
             except Exception as e:
-                logger.warn(f"搜索按钮点击失败: {e}")
+                logger.warn(f"搜索按钮点击失败: {e}  (Search button click failed)")
                 search_executed = False
         
         # 方式3：如果前两种方式都失败，尝试表单提交
         if not search_executed:
             try:
-                logger.info("尝试方式3：表单提交")
+                logger.info("尝试方式3：表单提交  (Attempting method 3: submit form)")
                 search_form = await page.query_selector('form[role="search"], form[action*="search"], form')
                 if search_form:
                     await search_form.evaluate('form => form.submit()')
@@ -149,16 +149,16 @@ class SearchExecutor:
                     # 最后检查是否被重定向
                     current_url = page.url
                     if self.is_blocked_page(current_url):
-                        logger.warn("方式3执行后仍然检测到人机验证页面")
+                        logger.warn("方式3执行后仍然检测到人机验证页面  (Method 3 still encountered CAPTCHA)")
                         search_executed = False
                     else:
-                        logger.info("表单提交完成")
+                        logger.info("表单提交完成  (Form submission completed)")
                         search_executed = True
                 else:
-                    logger.warn("未找到搜索表单")
+                    logger.warn("未找到搜索表单  (Search form not found)")
                     search_executed = False
             except Exception as e:
-                logger.warn(f"表单提交失败: {e}")
+                logger.warn(f"表单提交失败: {e}  (Form submission failed)")
                 search_executed = False
         
         if not search_executed:
@@ -169,78 +169,128 @@ class SearchExecutor:
             else:
                 raise Exception("所有搜索执行方式都失败了")
         
-        logger.info("搜索执行完成，等待页面加载")
+                logger.info("搜索执行完成，等待页面加载  (Search execution finished; waiting for page load)")
         return True
-    
-    async def wait_for_search_results(self, page: Page, timeout: int) -> bool:
+
+    async def wait_for_search_results(self, page: Page, timeout: int, basic_view: bool = False) -> bool:
+        """等待搜索结果加载
+        Wait for search results to appear using progressive timeouts
+
+        Supports `basic_view` where the page is static and we look for simpler containers.
+        """
+        logger.info(f"正在等待搜索结果加载... URL: {page.url} (basic_view={basic_view})  (Waiting for search results to load)")
         """等待搜索结果加载
         Wait for search results to appear using progressive timeouts
         """
-        logger.info(f"正在等待搜索结果加载... URL: {page.url}")
+        # (continued) main logic below
         
         results_found = False
         last_error = None
         
-        for selector in self.search_result_selectors:
-            try:
-                logger.info(f"尝试等待选择器: {selector}")
-                
-                # 使用渐进式超时策略
-                selector_timeout = 5000  # 初始等待5秒
-                attempts = 0
-                max_attempts = 3
-                
-                while attempts < max_attempts:
-                    try:
-                        await page.wait_for_selector(selector, timeout=selector_timeout, state="visible")
-                        logger.info(f"找到搜索结果: {selector}, 尝试次数: {attempts + 1}")
-                        results_found = True
+        if not basic_view:
+            for selector in self.search_result_selectors:
+                try:
+                    logger.info(f"尝试等待选择器: {selector}  (Waiting for selector: {selector})")
+                    
+                    # 使用渐进式超时策略
+                    selector_timeout = 5000  # 初始等待5秒
+                    attempts = 0
+                    max_attempts = 3
+                    
+                    while attempts < max_attempts:
+                        try:
+                            await page.wait_for_selector(selector, timeout=selector_timeout, state="visible")
+                            logger.info(f"找到搜索结果: {selector}, 尝试次数: {attempts + 1}  (Found results with selector: {selector})")
+                            results_found = True
+                            break
+                        except Exception as e:
+                            attempts += 1
+                            if attempts >= max_attempts:
+                                raise e  # 最后一次尝试失败，抛出错误
+                            
+                            logger.info(f"选择器等待超时，增加等待时间重试: selector={selector}, attempt={attempts}, timeout={selector_timeout}  (Selector timed out; increasing timeout and retrying)")
+                            selector_timeout = min(selector_timeout * 2, 15000)  # 翻倍超时时间，但不超过15秒
+                            
+                            # 短暂等待后重试
+                            await page.wait_for_timeout(1000)
+                    
+                    if results_found:
                         break
-                    except Exception as e:
-                        attempts += 1
-                        if attempts >= max_attempts:
-                            raise e  # 最后一次尝试失败，抛出错误
-                        
-                        logger.info(f"选择器等待超时，增加等待时间重试: selector={selector}, attempt={attempts}, timeout={selector_timeout}")
-                        selector_timeout = min(selector_timeout * 2, 15000)  # 翻倍超时时间，但不超过15秒
-                        
-                        # 短暂等待后重试
-                        await page.wait_for_timeout(1000)
-                
-                if results_found:
-                    break
-                
+                    
+                except Exception as e:
+                    last_error = e
+                    logger.warn(f"选择器等待失败，继续尝试下一个: selector={selector}, error={str(e)}  (Selector wait failed; trying next)")
+        else:
+            # Basic view: look for simple static containers
+            try:
+                await page.wait_for_selector('div.g, div.tF2Cxc, h3', timeout=min(8000, timeout))
+                logger.info("找到搜索结果: Basic View selectors  (Found search results: Basic View selectors)")
+                results_found = True
             except Exception as e:
                 last_error = e
-                logger.warn(f"选择器等待失败，继续尝试下一个: selector={selector}, error={str(e)}")
+                logger.warn(f"Basic View: 等待结果选择器失败: {e}  (Basic View: waiting for result selectors failed)")
+            
         
         if not results_found:
-            logger.error(f"无法找到搜索结果，开始诊断... lastError={str(last_error) if last_error else None}, currentUrl={page.url}")
+            logger.error(f"无法找到搜索结果，开始诊断... lastError={str(last_error) if last_error else None}, currentUrl={page.url}  (Unable to find search results; diagnosing)")
             
             # 检查是否被重定向到人机验证页面
             current_url = page.url
             is_blocked_during_results = self.is_blocked_page(current_url)
             
             if is_blocked_during_results:
-                logger.warn("等待搜索结果时检测到人机验证页面")
+                logger.warn("等待搜索结果时检测到人机验证页面  (Detected CAPTCHA while waiting for search results)")
                 # 返回特殊状态，让调用者知道需要处理人机验证
                 raise Exception("检测到人机验证页面")
             else:
                 # 如果不是人机验证问题，则抛出错误
-                logger.error("无法找到搜索结果元素")
+                logger.error("无法找到搜索结果元素  (Unable to find search result elements)")
                 raise Exception("无法找到搜索结果元素")
         
         # 减少等待时间
         await page.wait_for_timeout(get_random_delay(200, 500))
         
-        logger.info("正在提取搜索结果...")
+        logger.info("正在提取搜索结果...  (Extracting search results)")
         return True
     
-    async def extract_search_results(self, page: Page, limit: int) -> List[Dict[str, Any]]:
+    async def extract_search_results(self, page: Page, limit: int, basic_view: bool = False) -> List[Dict[str, Any]]:
         """提取搜索结果
         Extract raw search results from the page (ported logic)
         """
         # 提取搜索结果 - 使用移植自 google-search-extractor.cjs 的逻辑
+        if basic_view:
+            # Simpler extraction for gbv=1 (no JS, legacy HTML)
+            results = await page.evaluate("""
+                (maxResults) => {
+                    const results = [];
+                    const seenUrls = new Set();
+                    const containers = document.querySelectorAll('div.g, div.tF2Cxc');
+                    for (const container of containers) {
+                        if (results.length >= maxResults) break;
+                        const titleEl = container.querySelector('h3');
+                        if (!titleEl) continue;
+                        const title = (titleEl.textContent || '').trim();
+                        let link = '';
+                        const a = container.querySelector('a[href]');
+                        if (a) link = a.href;
+                        if (!link || !link.startsWith('http') || seenUrls.has(link)) continue;
+                        // snippet: try span.st then div.VwiC3b
+                        let snippet = '';
+                        const st = container.querySelector('span.st');
+                        if (st) snippet = (st.textContent || '').trim();
+                        else {
+                            const v = container.querySelector('div.VwiC3b');
+                            if (v) snippet = (v.textContent || '').trim();
+                        }
+                        results.push({ title, link, snippet });
+                        seenUrls.add(link);
+                    }
+                    return results.slice(0, maxResults);
+                }
+            """, limit)
+            logger.info(f"成功获取到搜索结果（Basic View）: {len(results)} 条  (Successfully extracted search results (Basic View): {len(results)})")
+            return results
+
         results = await page.evaluate("""
             (maxResults) => {
                 const results = [];
@@ -372,7 +422,7 @@ class SearchExecutor:
             }
         """, limit)
         
-        logger.info(f"成功获取到搜索结果: {len(results)} 条")
+        logger.info(f"成功获取到搜索结果: {len(results)} 条  (Successfully extracted search results: {len(results)})")
         return results
     
     def convert_to_search_results(self, raw_results: List[Dict[str, Any]]) -> List[SearchResult]:

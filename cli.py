@@ -66,6 +66,12 @@ async def main():
         help="不保存浏览器状态"
     )
     parser.add_argument(
+        "-b", "--basic-view", "--gbv",
+        dest="basic_view",
+        action="store_true",
+        help="使用 Google Basic Variant (gbv=1)，绕过 JS 驱动的检测（较小、无 JS 的旧界面）。别名: -b, --gbv"
+    )
+    parser.add_argument(
         "--get-html",
         action="store_true",
         help="获取搜索结果页面的原始HTML而不是解析结果"
@@ -95,9 +101,10 @@ async def main():
                 args.query,
                 CommandOptions(
                     limit=args.limit,
-                    timeout=args.timeout,
-                    state_file=args.state_file,
-                    no_save_state=args.no_save_state
+                        timeout=args.timeout,
+                        state_file=args.state_file,
+                        no_save_state=args.no_save_state,
+                        basic_view=args.basic_view
                 ),
                 args.save_html or False,
                 args.html_output
@@ -113,18 +120,19 @@ async def main():
             }, indent=2, ensure_ascii=False))
 
             if args.save_html:
-                print(f"\nHTML已保存到: {html_result.saved_path}")
+                print(f"\nHTML已保存到: {html_result.saved_path}  (HTML saved to: {html_result.saved_path})")
                 if html_result.screenshot_path:
-                    print(f"截图已保存到: {html_result.screenshot_path}")
+                    print(f"截图已保存到: {html_result.screenshot_path}  (Screenshot saved to: {html_result.screenshot_path})")
         else:
             # 执行搜索  # Execute search
             search_result = await google_search(
                 args.query,
                 CommandOptions(
                     limit=args.limit,
-                    timeout=args.timeout,
-                    state_file=args.state_file,
-                    no_save_state=args.no_save_state
+                        timeout=args.timeout,
+                        state_file=args.state_file,
+                        no_save_state=args.no_save_state,
+                        basic_view=args.basic_view
                 )
             )
 
@@ -142,10 +150,10 @@ async def main():
             }, indent=2, ensure_ascii=False))
 
     except KeyboardInterrupt:
-        print("\n搜索被用户中断")
+        print("\n搜索被用户中断  (Search interrupted by user)")
         sys.exit(1)
     except Exception as e:
-        print(f"搜索失败: {e}")
+        print(f"搜索失败: {e}  (Search failed: {e})")
         sys.exit(1)
 
 

@@ -36,6 +36,7 @@ class CommandOptions:
     no_save_state: Optional[bool] = None
     locale: Optional[str] = None
     headless: Optional[bool] = None
+    basic_view: Optional[bool] = None
 
 
 @dataclass

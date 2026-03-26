@@ -4,7 +4,7 @@ Browser manager module (refactored to provide an "Infosec-Grade" stealth layer)
 
 主要改进：
 - 使用 Chromium 的 `launch_persistent_context`（本地 `./user_data`）使会话可持久化
-- 使用 headless="new" 更难被检测
+ - 优先使用 headless="new"（如果 Playwright 支持），否则回退到布尔值以保持兼容性
 - UA 与 `hardwareConcurrency` / `deviceMemory` 保持一致
 - 注入 stealth 补丁（尝试使用 `playwright_stealth`，失败时回退到内置脚本）
 - 人类化交互助手：Bezier 鼠标移动，Gaussian 打字延迟，视口轻微抖动
@@ -12,7 +12,7 @@ Browser manager module (refactored to provide an "Infosec-Grade" stealth layer)
 
 Major improvements:
 - Use Chromium's `launch_persistent_context` (local `./user_data`) to persist sessions
-- Use `headless="new"` which is harder to detect
+ - Prefer `headless="new"` when Playwright supports it; fall back to boolean `headless` for compatibility
 - Ensure UA coherence with `hardwareConcurrency` / `deviceMemory`
 - Inject stealth patches (attempt `playwright_stealth`, fallback to built-in scripts)
 - Humanization helpers: Bezier mouse moves, Gaussian typing delays, slight viewport jitter
@@ -139,9 +139,9 @@ class BrowserManager:
         logger.info(f"Starting persistent browser context headless={headless} user_data={self.user_data_dir}")
 
         p = await async_playwright().start()
-        # Some Playwright versions expect a boolean for `headless` on persistent contexts.
-        # Use the boolean value to maximize compatibility.
-        headless_val = bool(headless)
+        # Prefer the newer headless mode flag when supported by Playwright ("new").
+        # Fall back to boolean for compatibility with older Playwright versions.
+        headless_try_value: Any = "new" if bool(headless) else False
 
         # Determine fingerprint / locale / timezone  # 确定指纹 / 区域 / 时区
         detected_locale, detected_tz = _detect_locale_timezone(locale)
@@ -183,11 +183,12 @@ class BrowserManager:
         Path(self.user_data_dir).mkdir(parents=True, exist_ok=True)
 
         # Launch persistent context  # 启动持久化上下文
-        context = await p.chromium.launch_persistent_context(
-            self.user_data_dir,
-            headless=headless_val,
-            timeout=timeout * 2,
-            args=[
+        try:
+            context = await p.chromium.launch_persistent_context(
+                self.user_data_dir,
+                headless=headless_try_value,
+                timeout=timeout * 2,
+                args=[
                 "--disable-blink-features=AutomationControlled",
                 "--disable-features=IsolateOrigins,site-per-process",
                 "--disable-site-isolation-trials",
@@ -216,6 +217,48 @@ class BrowserManager:
             ],
             **ctx_kwargs,
         )
+        except Exception as e:
+            # Some Playwright versions/platforms raise a generic error if headless="new" is unsupported.
+            err_text = str(e)
+            if "expected boolean" in err_text or "got string" in err_text or "headless: expected" in err_text:
+                logger.debug("Playwright persistent context does not accept headless=\"new\"; falling back to boolean headless")
+                headless_val = bool(headless)
+                context = await p.chromium.launch_persistent_context(
+                    self.user_data_dir,
+                    headless=headless_val,
+                    timeout=timeout * 2,
+                    args=[
+                        "--disable-blink-features=AutomationControlled",
+                        "--disable-features=IsolateOrigins,site-per-process",
+                        "--disable-site-isolation-trials",
+                        "--disable-web-security",
+                        "--no-sandbox",
+                        "--disable-setuid-sandbox",
+                        "--disable-dev-shm-usage",
+                        "--disable-accelerated-2d-canvas",
+                        "--no-first-run",
+                        "--no-zygote",
+                        "--disable-gpu",
+                        "--hide-scrollbars",
+                        "--mute-audio",
+                        "--disable-background-networking",
+                        "--disable-background-timer-throttling",
+                        "--disable-backgrounding-occluded-windows",
+                        "--disable-breakpad",
+                        "--disable-component-extensions-with-background-pages",
+                        "--disable-extensions",
+                        "--disable-features=TranslateUI",
+                        "--disable-ipc-flooding-protection",
+                        "--disable-renderer-backgrounding",
+                        "--enable-features=NetworkService,NetworkServiceInProcess",
+                        "--force-color-profile=srgb",
+                        "--metrics-recording-only",
+                    ],
+                    **ctx_kwargs,
+                )
+            else:
+                # Re-raise unexpected errors
+                raise
 
         # Apply stealth/init scripts to context (overrides navigator, chrome, outerWidth/Height, etc.)  # 应用隐身/初始化脚本到上下文（覆盖 navigator、chrome、outerWidth/Height 等）
         await self._apply_stealth_context_scripts(context, user_agent, hw)

@@ -307,6 +307,26 @@ This project implements multiple layers of anti-bot protection:
 - Browser state management
 - Automatic CAPTCHA detection and handling
 
+## Anti-Bot & Stealth Modes
+
+This project provides multiple operational modes to improve reliability when searching against Google while reducing the chance of triggering anti-bot defenses.
+
+- **Persistent Contexts (default)**: the tool uses Playwright's persistent Chromium context (stored under `./user_data` and `./browser-state.json`). Persisting state preserves cookies, localStorage, and other session artifacts so Google learns that requests come from an established browser profile. Over time this significantly reduces captcha frequency and improves the tool's reputation with Google's systems.
+
+- **Basic View (`--basic-view`, alias `-b` / `--gbv`)**: when enabled the tool appends `&gbv=1` to the search URL (Google Basic Variant). This forces a legacy, mostly static HTML page that does not execute client-side JavaScript. Because modern fingerprinting and behavioral scripts rely on JavaScript, the Basic View bypasses a large portion of JS-based bot detection. Use this mode when modern searches yield CAPTCHAs or when you need a faster, more stable extraction surface.
+
+- **Auto‑Retry Logic**: the engine will automatically attempt to recover from a CAPTCHA in Modern View by retrying the search once using Basic View. The fallback is performed transparently when a CAPTCHA is detected, so callers don't need to manually switch modes in many cases.
+
+When to use each mode:
+
+- Start with the default (persistent context, modern UI) — it provides the most natural results and preserves session behavior.
+- If you encounter recurrent CAPTCHAs or need deterministic HTML structure, use `--basic-view` (or `-b` / `--gbv`).
+
+Security & Compliance:
+
+- Respect Google's terms of service. This project is intended for research and debugging; avoid large-scale automated scraping without proper authorization.
+
+
 ## Performance
 
 - **Response Time**: Typically 5-15 seconds

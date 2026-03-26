@@ -3,6 +3,37 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Distribution / packaging
+*.egg-info/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Editor settings
+.vscode/
+.idea/
+
+# Playwright / browser state / test artifacts
+google-search-html/
+mcp_html_output/
+user_data/
+browser-state.json
+browser-state-fingerprint.json
+
+# Logs
+*.log
+
+# Misc
+*.pyc
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
 # C extensions
 *.so
 

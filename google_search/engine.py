@@ -28,7 +28,8 @@ from .fingerprint import get_host_machine_config, get_device_config, get_random_
 from .browser_manager import BrowserManager
 from .search_executor import SearchExecutor
 from .html_extractor import HtmlExtractor
-from .utils import safe_close_browser, safe_stop_playwright, suppress_platform_resource_warnings
+from .utils import safe_close_browser, safe_stop_playwright, suppress_platform_resource_warnings, safe_close_page, safe_close_context
+import sys
 
 # 抑制平台特定的资源清理警告
 # Suppress platform-specific resource cleanup warnings
@@ -66,6 +67,8 @@ async def google_search(
 
     # 忽略传入的headless参数，总是以无头模式启动（首次尝试）
     use_headless = True
+    # basic_view: whether to use Google Basic Variant (gbv=1)
+    basic_view = bool(options.basic_view) if getattr(options, 'basic_view', None) is not None else False
 
     logger.info(f"Initializing browser... options: limit={limit}, timeout={timeout}, stateFile={state_file}, noSaveState={no_save_state}, locale={locale}")
 
@@ -85,6 +88,7 @@ async def google_search(
         saved_state=saved_state,
         fingerprint_file=fingerprint_file,
         headless=use_headless,
+        basic_view=basic_view,
         existing_browser=existing_browser,
         browser_manager=browser_manager,
         search_executor=search_executor,
@@ -102,6 +106,7 @@ async def _perform_search_internal(
     saved_state: SavedState,
     fingerprint_file: str,
     headless: bool,
+    basic_view: bool = False,
     existing_browser: Optional[Browser] = None,
     browser_manager: BrowserManager = None,
     search_executor: SearchExecutor = None,
@@ -114,6 +119,7 @@ async def _perform_search_internal(
         browser_manager = BrowserManager()
     if search_executor is None:
         search_executor = SearchExecutor()
+    tried_basic_view = False
 
     # If an external browser was provided, try once using it and do not attempt to relaunch it automatically
     if existing_browser:
@@ -130,9 +136,9 @@ async def _perform_search_internal(
                 fingerprint_file=fingerprint_file,
                 headless=headless,
                 browser_was_provided=True,
+                basic_view=basic_view,
                 browser_manager=browser_manager,
                 search_executor=search_executor,
-                attempts_remaining=attempts_remaining,
             )
         except CaptchaDetected as cpe:
             logger.warn(f"CAPTCHA detected when using provided browser: {cpe}, url={cpe.url}")
@@ -162,12 +168,14 @@ async def _perform_search_internal(
         attempt += 1
         p = None
         context = None
+        result = None
         try:
             logger.info(f"Attempt {attempt}: launching browser in {'headless' if current_headless else 'headful'} mode")
             p, context = await browser_manager.launch_browser(current_headless, timeout, locale)
 
             try:
-                return await _perform_search_with_browser(
+                # run the search and capture the result instead of returning directly
+                result = await _perform_search_with_browser(
                     browser=context,
                     query=query,
                     limit=limit,
@@ -179,9 +187,9 @@ async def _perform_search_internal(
                     fingerprint_file=fingerprint_file,
                     headless=current_headless,
                     browser_was_provided=False,
+                    basic_view=basic_view,
                     browser_manager=browser_manager,
                     search_executor=search_executor,
-                    attempts_remaining=attempts_remaining,
                 )
             finally:
                 # ensure context closed by browser_manager or caller; safe to ignore failures here
@@ -199,6 +207,44 @@ async def _perform_search_internal(
                     await safe_stop_playwright(p)
                 except Exception:
                     pass
+
+            # If running interactively, open a headful persistent context and prompt the user to solve CAPTCHA.
+            if sys.stdin is not None and sys.stdin.isatty():
+                try:
+                    logger.info("Interactive session detected — launching headful browser for manual CAPTCHA solve...")
+                    p_manual, context_manual = await browser_manager.launch_browser(False, timeout, locale)
+                    try:
+                        # Open the blocked URL (if available) or the Google domain to allow manual verification
+                        manual_page = await browser_manager.create_page(context_manual)
+                        target = cpe.url or browser_manager.get_google_domain(saved_state)
+                        await manual_page.goto(target, timeout=timeout, wait_until="networkidle")
+                        input("CAPTCHA detected. Please solve it in the browser window and press Enter here to continue...")
+                        # After manual solve, save state so future headless runs may reuse it
+                        try:
+                            await browser_manager.save_browser_state(context_manual, state_file, fingerprint_file, saved_state, no_save_state)
+                        except Exception as e:
+                            logger.warn(f"Failed to save browser state after manual CAPTCHA solve: {e}")
+                    finally:
+                        try:
+                            await safe_close_context(context_manual)
+                        except Exception:
+                            pass
+                        try:
+                            await safe_stop_playwright(p_manual)
+                        except Exception:
+                            pass
+                    # Give a small grace period before retrying
+                    await asyncio.sleep(2)
+                except Exception as man_e:
+                    logger.warn(f"Interactive CAPTCHA solve flow failed: {man_e}")
+
+            # If we haven't tried the basic (gbv=1) fallback yet and we're not already in basic_view, try it once
+            if not basic_view and not tried_basic_view:
+                logger.info("Attempting fallback to Basic View (gbv=1) due to CAPTCHA")
+                tried_basic_view = True
+                basic_view = True
+                # keep attempts_remaining unchanged for this fallback attempt
+                continue
 
             attempts_remaining -= 1
             if attempts_remaining <= 0:
@@ -229,6 +275,17 @@ async def _perform_search_internal(
                 except Exception:
                     pass
             break
+        finally:
+            # Always attempt to stop the Playwright process for this attempt
+            if p is not None:
+                try:
+                    await safe_stop_playwright(p)
+                except Exception:
+                    pass
+
+        # If the attempt produced a result (successful search), return it now
+        if result is not None:
+            return result
 
     err_msg = str(last_error) if last_error else "Unknown error"
     return SearchResponse(
@@ -251,7 +308,7 @@ async def _perform_search_with_browser(
     browser_was_provided: bool,
     browser_manager: BrowserManager,
     search_executor: SearchExecutor,
-    attempts_remaining: int = 3,
+    basic_view: bool = False,
 ) -> SearchResponse:
     """使用给定浏览器/上下文执行搜索的内部函数
     Internal function that runs a search using the provided browser/context
@@ -263,30 +320,46 @@ async def _perform_search_with_browser(
         context = await browser_manager.create_context(browser, saved_state, state_file, locale)
         page = await browser_manager.create_page(context)
 
-        # Navigate to Google and check for blocking
+        # Navigate to Google (or directly to the Basic View search URL) and check for blocking
         selected_domain = browser_manager.get_google_domain(saved_state)
-        logger.info("Navigating to Google search page...")
-        response = await page.goto(selected_domain, timeout=timeout, wait_until="networkidle")
+        if basic_view:
+            # Construct Basic Variant (gbv=1) search URL — no JS required
+            from urllib.parse import quote_plus
+            search_url = f"{selected_domain}/search?q={quote_plus(query)}&gbv=1"
+            logger.info(f"Navigating to Basic View search URL: {search_url}")
+            response = await page.goto(search_url, timeout=timeout, wait_until="domcontentloaded")
+            # Basic view is static; check for blocking
+            current_url = page.url
+            response_url = response.url if response else None
+            if search_executor.is_blocked_page(current_url, response_url):
+                raise CaptchaDetected("Blocked by CAPTCHA/verification on Basic View navigation", current_url)
 
-        current_url = page.url
-        response_url = response.url if response else None
-        if search_executor.is_blocked_page(current_url, response_url):
-            raise CaptchaDetected("Blocked by CAPTCHA/verification on initial navigation", current_url)
+            # Extract results using basic_view selectors
+            await search_executor.wait_for_search_results(page, timeout, basic_view=True)
+            raw_results = await search_executor.extract_search_results(page, limit, basic_view=True)
+        else:
+            logger.info("Navigating to Google search page...")
+            response = await page.goto(selected_domain, timeout=timeout, wait_until="networkidle")
 
-        # Execute the search
-        await search_executor.execute_search(page, query)
-        await page.wait_for_load_state("networkidle", timeout=timeout)
-        await page.wait_for_timeout(3000)
+            current_url = page.url
+            response_url = response.url if response else None
+            if search_executor.is_blocked_page(current_url, response_url):
+                raise CaptchaDetected("Blocked by CAPTCHA/verification on initial navigation", current_url)
 
-        final_url = page.url
-        logger.info(f"Final URL after page load: {final_url}")
+            # Execute the search (dynamic modern page)
+            await search_executor.execute_search(page, query)
+            await page.wait_for_load_state("networkidle", timeout=timeout)
+            await page.wait_for_timeout(3000)
 
-        if search_executor.is_blocked_page(final_url):
-            raise CaptchaDetected("Blocked by CAPTCHA/verification after search execution", final_url)
+            final_url = page.url
+            logger.info(f"Final URL after page load: {final_url}")
 
-        # Extract results
-        await search_executor.wait_for_search_results(page, timeout)
-        raw_results = await search_executor.extract_search_results(page, limit)
+            if search_executor.is_blocked_page(final_url):
+                raise CaptchaDetected("Blocked by CAPTCHA/verification after search execution", final_url)
+
+            # Extract results using modern selectors
+            await search_executor.wait_for_search_results(page, timeout, basic_view=False)
+            raw_results = await search_executor.extract_search_results(page, limit, basic_view=False)
         search_results = search_executor.convert_to_search_results(raw_results)
 
         # Save browser state
@@ -330,6 +403,18 @@ async def _perform_search_with_browser(
                 )
             ]
         )
+    finally:
+        # Ensure page and context are closed to avoid leaking resources.
+        if page is not None:
+            try:
+                await safe_close_page(page)
+            except Exception:
+                pass
+        if context is not None:
+            try:
+                await safe_close_context(context)
+            except Exception:
+                pass
 
 
 async def get_google_search_page_html(
