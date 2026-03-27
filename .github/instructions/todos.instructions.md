@@ -6,10 +6,10 @@ applyTo: '**'
 - [x] scan-repo-for-chinese-comments: scan-repo-for-chinese-comments 🟢
 - [x] translate-remaining-files: translate-remaining-files 🟡
 - [ ] apply-translations-in-batches: apply-translations-in-batches 🟡
-- [ ] run-runtime-validation: run-runtime-validation 🔴
+- [-] run-runtime-validation: run-runtime-validation (execute test suite and runtime checks) 🔴
 - [ ] commit-and-document-changes: commit-and-document-changes 🟡
 - [x] run-lint-format: run-lint-format 🟢
-- [x] dockerfile-ubuntu-update: dockerfile-ubuntu: use chromium-browser and libasound2t64, remove duplicate flag 🟢
+- [x] remove-smoke-test: remove-smoke-test (delete tests/smoke_call_tool.py) 🟢
 </todos>
 
 <!-- Auto-generated todo section -->
