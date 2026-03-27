@@ -55,6 +55,12 @@ from common.types import SavedState, FingerprintConfig
 from common import logger
 from .fingerprint import get_host_machine_config, get_device_config, playwright_devices
 from .utils import safe_stop_playwright
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def _noop_ctx():
+    yield
 
 
 # Limit concurrent crawls to avoid high-entropy traffic that triggers CAPTCHAs
@@ -822,6 +828,44 @@ class BrowserManager:
             except Exception as e:
                 logger.error(f"export_for_crawl4ai failed: {e}")
                 raise
+
+    @asynccontextmanager
+    async def get_page_context(self, headless: bool = True, timeout: int = 30000, locale: Optional[str] = None):
+        """Async context manager that yields a (context, page) tuple and ensures cleanup.
+
+        This launches Playwright persistent context if needed, creates a new page,
+        yields `(context, page)`, and guarantees `page.close()`, `context.close()`,
+        and stopping Playwright in the finally block to avoid orphaned processes.
+
+        Respects environment variables such as `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` and `BROWSER_PATH`.
+        """
+        p = None
+        context = None
+        page = None
+        try:
+            # Launch browser/context via existing helper which in turn honors environment variables
+            p, context = await self.launch_browser(headless, timeout, locale)
+            page = await self.create_page(context)
+            yield (context, page)
+        finally:
+            # Close page
+            try:
+                if page is not None:
+                    await page.close()
+            except Exception:
+                pass
+            # Close context
+            try:
+                if context is not None:
+                    await context.close()
+            except Exception:
+                pass
+            # Stop Playwright to ensure no orphaned driver processes
+            try:
+                if p is not None:
+                    await safe_stop_playwright(p)
+            except Exception:
+                pass
 
 
 # end of file

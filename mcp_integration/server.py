@@ -36,7 +36,7 @@ _domain_locks: Dict[str, asyncio.Lock] = {}
 from google_search.distiller import ContentDistiller
 from google_search.search_executor import SearchExecutor
 from google_search.utils import safe_stop_playwright, safe_close_context, safe_close_page
-from common.types import CommandOptions
+from common.types import CommandOptions, SavedState
 from common import logger
 
 # Ensure a sane default locale inside the process so logs and Playwright
@@ -146,26 +146,27 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> Any:
                     )
                 ]
 
+            browser_manager = BrowserManager()
+            # Use auto-cleanup context manager to avoid orphaned browsers
             try:
-                result = await asyncio.wait_for(
-                    google_search(query, CommandOptions(limit=limit, timeout=timeout, basic_view=basic_view)),
-                    timeout=(timeout / 1000) + 10,
-                )
-                # Convert dataclass result to a JSON-serializable dict and
-                # return it as structured content (dict) so the MCP layer
-                # does a single JSON encoding. Returning a dict here
-                # avoids double-encoding JSON strings inside `TextContent`.
-                try:
-                    result_obj = asdict(result)
-                except Exception:
-                    result_obj = result
-                # Return structured content (dict) directly. The MCP
-                # server will include an unstructured text fallback
-                # automatically when packaging the response.
-                return result_obj
+                async with browser_manager.get_page_context() as (context, page):
+                    result = await asyncio.wait_for(
+                        google_search(query, CommandOptions(limit=limit, timeout=timeout, basic_view=basic_view), existing_browser=context),
+                        timeout=(timeout / 1000) + 10,
+                    )
+                    try:
+                        result_obj = asdict(result)
+                    except Exception:
+                        # Fallback: try to convert to dict-like
+                        try:
+                            result_obj = dict(result)
+                        except Exception:
+                            result_obj = result
+                    text = json.dumps(result_obj, ensure_ascii=False)
+                    return [TextContent(type="text", text=text)]
             except Exception as e:
                 logger.error(f"google-search failed: {e}")
-                return [TextContent(type="text", text=f"搜索失败: {str(e)}")]
+                return [TextContent(type="text", text=json.dumps({"error": str(e)}, ensure_ascii=False))]
 
         elif name == "get-webpage-html":
             query = arguments.get("query", "")
@@ -173,36 +174,64 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> Any:
             output_path = arguments.get("outputPath")
 
             if not query:
-                return [TextContent(type="text", text="错误：搜索查询不能为空")]
+                return [TextContent(type="text", text=json.dumps({"error": "搜索查询不能为空"}, ensure_ascii=False))]
 
+            browser_manager = BrowserManager()
             try:
-                html_result = await asyncio.wait_for(
-                    get_google_search_page_html(query, CommandOptions(), save_to_file, output_path),
-                    timeout=60,
-                )
+                async with browser_manager.get_page_context() as (context, page):
+                    # Use the existing context/page to perform a search and capture HTML
+                    selected_domain = browser_manager.get_google_domain(SavedState())
+                    await page.goto(selected_domain, timeout=60000, wait_until="networkidle")
+                    # perform search
+                    try:
+                        search_input = await page.wait_for_selector("textarea[name='q'], input[name='q']", timeout=5000)
+                        await search_input.click()
+                        await page.keyboard.type(query, delay=10)
+                        await page.keyboard.press("Enter")
+                    except Exception:
+                        pass
+                    await page.wait_for_load_state("networkidle", timeout=60000)
+                    await page.wait_for_timeout(1000)
+                    full_html = await page.content()
+                    cleaned = full_html
+                    # Simplified cleaning: remove scripts and styles
+                    import re
 
-                result_text = "HTML获取成功\n\n"
-                result_text += f"查询: {html_result.query}\n"
-                result_text += f"URL: {html_result.url}\n"
-                result_text += f"HTML长度: {html_result.original_html_length} 字符\n"
+                    cleaned = re.sub(r"<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>", "", cleaned, flags=re.IGNORECASE)
+                    cleaned = re.sub(r"<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>", "", cleaned, flags=re.IGNORECASE)
 
-                if html_result.saved_path:
-                    result_text += f"保存路径: {html_result.saved_path}\n"
+                    saved_path = None
+                    screenshot_path = None
+                    if save_to_file:
+                        out_dir = Path(output_path) if output_path else Path("mcp_html_output")
+                        if out_dir.is_file():
+                            out_dir = out_dir.parent
+                        out_dir.mkdir(parents=True, exist_ok=True)
+                        ts = int(time.time())
+                        file_path = out_dir / f"{query.replace(' ','_')}-{ts}.html"
+                        with open(file_path, "w", encoding="utf-8") as f:
+                            f.write(cleaned)
+                        saved_path = str(file_path)
+                        try:
+                            screenshot_path = str(out_dir / f"{query.replace(' ','_')}-{ts}.png")
+                            await page.screenshot(path=screenshot_path, full_page=True)
+                        except Exception:
+                            screenshot_path = None
 
-                if html_result.screenshot_path:
-                    result_text += f"截图路径: {html_result.screenshot_path}\n"
-
-                result_text += "\nHTML内容预览 (前500字符):\n"
-                result_text += (
-                    html_result.html[:500] + "..." if len(html_result.html) > 500 else html_result.html
-                )
-
-                return [TextContent(type="text", text=result_text)]
+                    resp = {
+                        "query": query,
+                        "url": page.url,
+                        "original_html_length": len(full_html),
+                        "html": cleaned[:200000],
+                        "saved_path": saved_path,
+                        "screenshot_path": screenshot_path,
+                    }
+                    return [TextContent(type="text", text=json.dumps(resp, ensure_ascii=False))]
             except asyncio.TimeoutError:
-                return [TextContent(type="text", text=f"HTML获取超时: 查询 '{query}' 在60秒内未完成")]
+                return [TextContent(type="text", text=json.dumps({"error": "HTML获取超时"}, ensure_ascii=False))]
             except Exception as e:
                 logger.error(f"HTML获取失败: {e}")
-                return [TextContent(type="text", text=f"HTML获取失败: {str(e)}")]
+                return [TextContent(type="text", text=json.dumps({"error": str(e)}, ensure_ascii=False))]
 
         elif name == "get-webpage-markdown":
             url = arguments.get("url", "")
@@ -212,7 +241,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> Any:
             output_path = arguments.get("outputPath")
 
             if not url:
-                return [TextContent(type="text", text="错误：url 不能为空")]
+                return [TextContent(type="text", text=json.dumps({"error": "url 不能为空"}, ensure_ascii=False))]
 
             logger.info(f"收到网页提炼请求: url={url}, query={query}, timeout={timeout}")
 
@@ -226,11 +255,7 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> Any:
             logger.info(f"[INFO] Queueing crawl for {url}...")
             await _crawl_semaphore.acquire()
 
-            p = None
-            context = None
-            page = None
             screenshot_path = None
-            acquired = True
             try:
                 # Enforce per-domain politeness delay using a per-domain lock
                 domain = urlparse(url).netloc.lower()
@@ -246,143 +271,110 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> Any:
                         to_wait = _POLITENESS_DELAY_SECONDS - (now - last)
                         logger.info(f"[INFO] Politeness delay for {domain}: sleeping {to_wait:.2f}s")
                         await asyncio.sleep(to_wait)
-                    # record this crawl start time
                     _last_crawl_times[domain] = time.time()
 
-                # Launch a persistent context and create a page
-                p, context = await browser_manager.launch_browser(True, timeout, "en-US")
-                page = await browser_manager.create_page(context)
+                async with browser_manager.get_page_context() as (context, page):
+                    try:
+                        response = await page.goto(url, timeout=timeout, wait_until="networkidle")
+                    except Exception as nav_e:
+                        logger.error(f"Navigation to {url} failed: {nav_e}")
+                        return [TextContent(type="text", text=json.dumps({"error": {"reason": "navigation_failed", "message": str(nav_e)}}, ensure_ascii=False))]
 
-                try:
-                    response = await page.goto(url, timeout=timeout, wait_until="networkidle")
-                except Exception as nav_e:
-                    logger.error(f"Navigation to {url} failed: {nav_e}")
-                    return [
-                        TextContent(
-                            type="text",
-                            text=json.dumps({"error": {"reason": "navigation_failed", "message": str(nav_e)}}, ensure_ascii=False),
-                        )
-                    ]
-
-                status = None
-                try:
-                    status = response.status if response else None
-                except Exception:
                     status = None
-
-                if status and status >= 400:
-                    err_obj = {"error": {"reason": "http_error", "status": status, "url": url}}
-                    return [TextContent(type="text", text=json.dumps(err_obj, ensure_ascii=False))]
-
-                if search_executor.is_blocked_page(page.url, response.url if response and getattr(response, "url", None) else ""):
-                    err_obj = {"error": {"reason": "blocked", "message": "Blocked by CAPTCHA or verification page", "url": page.url}}
-                    return [TextContent(type="text", text=json.dumps(err_obj, ensure_ascii=False))]
-
-                if save_screenshot:
-                    out_dir = Path(output_path) if output_path else Path("mcp_html_output")
-                    if out_dir.is_file():
-                        out_dir = out_dir.parent
-                    out_dir.mkdir(parents=True, exist_ok=True)
-                    ts = int(time.time())
-                    screenshot_path = str(out_dir / f"screenshot_{ts}.png")
                     try:
-                        await page.screenshot(path=screenshot_path, full_page=True)
-                    except Exception as ss_e:
-                        logger.warning(f"Screenshot failed: {ss_e}")
-                        screenshot_path = None
+                        status = response.status if response else None
+                    except Exception:
+                        status = None
 
-                # Export a minimal, filtered storage_state for Crawl4AI to carry reputation
-                exported_path = None
-                cleanup_func = None
-                try:
-                    try:
-                        exported_path, cleanup_func = await browser_manager.export_for_crawl4ai(context, [url], ttl_seconds=30)
-                        logger.info(f"[INFO] export_for_crawl4ai created: {exported_path}")
-                    except Exception as e:
-                        logger.warning(f"[WARN] export_for_crawl4ai failed: {e}")
+                    if status and status >= 400:
+                        err_obj = {"error": {"reason": "http_error", "status": status, "url": url}}
+                        return [TextContent(type="text", text=json.dumps(err_obj, ensure_ascii=False))]
 
-                    if exported_path:
-                        # Create an ephemeral Playwright context that uses the exported storage_state
-                        from playwright.async_api import async_playwright
+                    if search_executor.is_blocked_page(page.url, response.url if response and getattr(response, "url", None) else ""):
+                        err_obj = {"error": {"reason": "blocked", "message": "Blocked by CAPTCHA or verification page", "url": page.url}}
+                        return [TextContent(type="text", text=json.dumps(err_obj, ensure_ascii=False))]
 
-                        p2 = await async_playwright().start()
-                        ctx2 = None
-                        browser2 = None
+                    if save_screenshot:
+                        out_dir = Path(output_path) if output_path else Path("mcp_html_output")
+                        if out_dir.is_file():
+                            out_dir = out_dir.parent
+                        out_dir.mkdir(parents=True, exist_ok=True)
+                        ts = int(time.time())
+                        screenshot_path = str(out_dir / f"screenshot_{ts}.png")
                         try:
-                            browser2 = await p2.chromium.launch(headless=True)
-                            ctx2 = await browser2.new_context(storage_state=exported_path)
-                            # Pass the ephemeral context to the distiller so Crawl4AI (or Playwright) can use it
-                            distiller = ContentDistiller(context=ctx2, page=None)
-                            distill_result = await distiller.distill(url, query=query, basic_view=use_basic_view)
-                        finally:
-                            try:
-                                if ctx2 is not None:
-                                    await ctx2.close()
-                            except Exception:
-                                pass
-                            try:
-                                if browser2 is not None:
-                                    await browser2.close()
-                            except Exception:
-                                pass
-                            try:
-                                await p2.stop()
-                            except Exception:
-                                pass
-                    else:
-                        # fallback to using our existing persistent context/page
-                        distiller = ContentDistiller(context=context, page=page)
-                        distill_result = await distiller.distill(url, query=query, basic_view=use_basic_view)
-                finally:
-                    # Ensure exported state file is cleaned up
+                            await page.screenshot(path=screenshot_path, full_page=True)
+                        except Exception as ss_e:
+                            logger.warning(f"Screenshot failed: {ss_e}")
+                            screenshot_path = None
+
+                    # Export a minimal, filtered storage_state for Crawl4AI to carry reputation
+                    exported_path = None
+                    cleanup_func = None
                     try:
-                        if cleanup_func:
-                            await cleanup_func()
-                            logger.info("[INFO] export_for_crawl4ai cleanup completed")
-                    except Exception as e:
-                        logger.warning(f"[WARN] export_for_crawl4ai cleanup failed: {e}")
+                        try:
+                            exported_path, cleanup_func = await browser_manager.export_for_crawl4ai(context, [url], ttl_seconds=30)
+                            logger.info(f"[INFO] export_for_crawl4ai created: {exported_path}")
+                        except Exception as e:
+                            logger.warning(f"[WARN] export_for_crawl4ai failed: {e}")
 
-                out = {
-                    "markdown": distill_result.get("markdown", ""),
-                    "metadata": {
-                        "title": distill_result.get("title", ""),
-                        "url": distill_result.get("url", url),
-                        "extraction_method": distill_result.get("method", "fallback"),
-                    },
-                    "screenshot_path": screenshot_path,
-                }
+                        if exported_path:
+                            # Create an ephemeral Playwright context that uses the exported storage_state
+                            from playwright.async_api import async_playwright
 
-                # Progress logging with strategy
-                strategy = distill_result.get("method", "fallback") if isinstance(distill_result, dict) else "fallback"
-                logger.info(f"[INFO] Crawl completed for {url} using {strategy}")
+                            p2 = await async_playwright().start()
+                            ctx2 = None
+                            browser2 = None
+                            try:
+                                browser2 = await p2.chromium.launch(headless=True)
+                                ctx2 = await browser2.new_context(storage_state=exported_path)
+                                distiller = ContentDistiller(context=ctx2, page=None)
+                                distill_result = await distiller.distill(url, query=query, basic_view=use_basic_view)
+                            finally:
+                                try:
+                                    if ctx2 is not None:
+                                        await ctx2.close()
+                                except Exception:
+                                    pass
+                                try:
+                                    if browser2 is not None:
+                                        await browser2.close()
+                                except Exception:
+                                    pass
+                                try:
+                                    await p2.stop()
+                                except Exception:
+                                    pass
+                        else:
+                            distiller = ContentDistiller(context=context, page=page)
+                            distill_result = await distiller.distill(url, query=query, basic_view=use_basic_view)
+                    finally:
+                        try:
+                            if cleanup_func:
+                                await cleanup_func()
+                                logger.info("[INFO] export_for_crawl4ai cleanup completed")
+                        except Exception as e:
+                            logger.warning(f"[WARN] export_for_crawl4ai cleanup failed: {e}")
 
-                return [TextContent(type="text", text=json.dumps(out, ensure_ascii=False))]
+                    out = {
+                        "markdown": distill_result.get("markdown", ""),
+                        "metadata": {
+                            "title": distill_result.get("title", ""),
+                            "url": distill_result.get("url", url),
+                            "extraction_method": distill_result.get("method", "fallback"),
+                        },
+                        "screenshot_path": screenshot_path,
+                    }
 
+                    strategy = distill_result.get("method", "fallback") if isinstance(distill_result, dict) else "fallback"
+                    logger.info(f"[INFO] Crawl completed for {url} using {strategy}")
+
+                    return [TextContent(type="text", text=json.dumps(out, ensure_ascii=False))]
             except Exception as e:
                 logger.error(f"网页提炼失败: {e}")
-                return [
-                    TextContent(type="text", text=json.dumps({"error": {"reason": "exception", "message": str(e)}}, ensure_ascii=False))
-                ]
+                return [TextContent(type="text", text=json.dumps({"error": {"reason": "exception", "message": str(e)}}, ensure_ascii=False))]
             finally:
-                # release global crawl semaphore
                 try:
-                    if acquired:
-                        _crawl_semaphore.release()
-                except Exception:
-                    pass
-                try:
-                    if page is not None:
-                        await safe_close_page(page)
-                except Exception:
-                    pass
-                try:
-                    if context is not None:
-                        await safe_close_context(context)
-                except Exception:
-                    pass
-                try:
-                    if p is not None:
-                        await safe_stop_playwright(p)
+                    _crawl_semaphore.release()
                 except Exception:
                     pass
 
