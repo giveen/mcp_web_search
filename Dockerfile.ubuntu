@@ -3,7 +3,9 @@ FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 
-# --- System dependencies (Playwright/Chromium + build tools) ---
+# =========================
+# 1. System dependencies
+# =========================
 RUN apt-get update && apt-get install -y --no-install-recommends \
     software-properties-common \
     curl ca-certificates gnupg \
@@ -13,43 +15,60 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxcomposite1 libxcursor1 libxdamage1 libxext6 libxfixes3 libxi6 libxrandr2 libxrender1 \
     libxss1 libxtst6 libasound2t64 libgbm1 \
     build-essential libssl-dev libffi-dev git \
+    python3-full python3-pip python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
-# --- Python runtime ---
-RUN add-apt-repository universe || true && apt-get update \
-    && apt-get install -y --no-install-recommends \
-       python3-full python3-pip python3-venv \
-    && rm -rf /var/lib/apt/lists/*
-
-# Ensure chromium binary path consistency
+# Chromium symlink consistency
 RUN ln -sf /usr/bin/chromium /usr/bin/chromium-browser || true
 
-# --- App setup ---
+# =========================
+# 2. Python virtual environment
+# =========================
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+RUN pip install --upgrade pip
+
+# =========================
+# 3. Working directory
+# =========================
 WORKDIR /app
-COPY . .
+
+# =========================
+# 4. Install Python deps (cached layer)
+# =========================
+COPY requirements.txt /app/requirements.txt
+
+RUN pip install --no-cache-dir \
+    "mcp[server]" \
+    fastapi \
+    uvicorn && \
+    pip install --no-cache-dir -r requirements.txt
+
+# =========================
+# 5. Copy application code (LAST for caching)
+# =========================
+COPY . /app
 
 ENV PYTHONPATH="/app"
 
-# Playwright config (use system Chromium)
+# =========================
+# 6. Playwright / browser config
+# =========================
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 ENV BROWSER_PATH=/usr/bin/chromium-browser
 ENV DISPLAY=:99
 
-# --- Python virtual environment ---
-RUN python3 -m venv /opt/venv \
-    && /opt/venv/bin/pip install --upgrade pip \
-    && /opt/venv/bin/pip install --no-cache-dir "mcp[server]" fastapi uvicorn \
-    && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
-
-ENV PATH="/opt/venv/bin:$PATH"
-
-# --- MCP HTTP/SSE CONFIG (THIS IS THE IMPORTANT PART) ---
+# =========================
+# 7. MCP SSE config
+# =========================
 ENV MCP_SSE=1
 ENV MCP_SSE_HOST=0.0.0.0
 ENV MCP_SSE_PORT=8000
 
-# Document the port
 EXPOSE 8000
 
-# --- Entrypoint ---
-    ENTRYPOINT ["bash", "-c", "Xvfb :99 -screen 0 1280x960x24 & exec python3 -m mcp_integration.server"]
+# =========================
+# 8. Entrypoint (fixed + reliable)
+# =========================
+ENTRYPOINT ["bash", "-c", "Xvfb :99 -screen 0 1280x960x24 & exec python3 -m mcp_integration.server"]
