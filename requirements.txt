@@ -15,3 +15,5 @@ playwright-stealth>=1.0.0
 
 # Optional but recommended for accurate hardware profiling
 psutil>=5.9.0
+fastapi>=0.95.0
+uvicorn>=0.22.0
