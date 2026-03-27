@@ -52,4 +52,4 @@ ENV MCP_SSE_PORT=8000
 EXPOSE 8000
 
 # --- Entrypoint ---
-ENTRYPOINT ["xvfb-run", "--auto-servernum", "--server-args=-screen 0 1280x960x24", "python3", "-m", "mcp_integration.server"]
+    ENTRYPOINT ["bash", "-c", "Xvfb :99 -screen 0 1280x960x24 & exec python3 -m mcp_integration.server"]
