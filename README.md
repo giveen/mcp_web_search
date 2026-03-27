@@ -334,3 +334,17 @@ Security & Compliance:
 - **Concurrency**: Supports asynchronous operations
 - **Memory Usage**: Optimized with cleanup after each call
 - **Stability**: Robust error recovery and timeout handling
+
+## Recent Changes
+
+- Removed the top-level `Dockerfile`; use `Dockerfile.ubuntu` for building the Ubuntu-based image.
+- MCP server now supports HTTP/SSE mode (Starlette + `SseServerTransport`). To run in SSE mode:
+
+  ```bash
+  MCP_SSE=1 MCP_SSE_HOST=0.0.0.0 MCP_SSE_PORT=8000 python -m mcp_integration.server
+  ```
+
+- A `/health` endpoint is available at `http://<host>:<port>/health` (returns `ok`) for container healthchecks.
+- The MCP `google-search` tool now returns structured JSON (dict) as the tool result to avoid double-encoding JSON strings — clients receive a single valid JSON object.
+- Process locale defaults are set to `en_US.UTF-8` inside the server process to avoid unexpected locale-dependent behavior in Playwright and logs.
+- Minor lint fixes applied to `mcp_integration/server.py`.
