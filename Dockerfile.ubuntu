@@ -1,28 +1,34 @@
-FROM ubuntu:24.04
+FROM python:3.12-slim
 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    MCP_SSE=1 \
+    MCP_SSE_HOST=0.0.0.0 \
+    MCP_SSE_PORT=8000 \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+    HOME=/home/appuser
 
 # =========================
 # 1. System dependencies
 # =========================
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    software-properties-common \
-    curl ca-certificates gnupg \
-    xvfb chromium-browser fonts-liberation x11-utils \
-    libnss3 libatk1.0-0 libatk-bridge2.0-0 libcairo2 libdbus-1-3 libexpat1 libfontconfig1 \
-    libgdk-pixbuf2.0-0 libglib2.0-0 libgtk-3-0 libpango-1.0-0 libx11-6 libx11-xcb1 libxcb1 \
-    libxcomposite1 libxcursor1 libxdamage1 libxext6 libxfixes3 libxi6 libxrandr2 libxrender1 \
-    libxss1 libxtst6 libasound2t64 libgbm1 \
-    build-essential libssl-dev libffi-dev git \
-    python3-full python3-pip python3-venv \
+    curl git ca-certificates \
+    libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+    libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+    libgbm1 libasound2 \
+    libpangocairo-1.0-0 libgtk-3-0 \
+    libxss1 fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
-# Chromium symlink consistency
-RUN ln -sf /usr/bin/chromium /usr/bin/chromium-browser || true
+# =========================
+# 2. Create non-root user (SECURITY)
+# =========================
+RUN useradd -m appuser
+
+WORKDIR /app
 
 # =========================
-# 2. Python virtual environment
+# 3. Python venv (PEP-668 safe)
 # =========================
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
@@ -30,45 +36,41 @@ ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --upgrade pip
 
 # =========================
-# 3. Working directory
+# 4. Install Python dependencies
 # =========================
-WORKDIR /app
+COPY requirements.txt .
+
+RUN pip install --no-cache-dir -r requirements.txt
 
 # =========================
-# 4. Install Python deps (cached layer)
+# 5. Playwright browser install
 # =========================
-COPY requirements.txt /app/requirements.txt
-
-RUN pip install --no-cache-dir \
-    "mcp[server]" \
-    fastapi \
-    uvicorn && \
-    pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir playwright && \
+    playwright install chromium
 
 # =========================
-# 5. Copy application code (LAST for caching)
+# 6. Copy application
 # =========================
-COPY . /app
+COPY . .
 
-ENV PYTHONPATH="/app"
-
-# =========================
-# 6. Playwright / browser config
-# =========================
-ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-ENV BROWSER_PATH=/usr/bin/chromium-browser
-ENV DISPLAY=:99
+ENV PYTHONPATH=/app
 
 # =========================
-# 7. MCP SSE config
+# 7. Permissions
 # =========================
-ENV MCP_SSE=1
-ENV MCP_SSE_HOST=0.0.0.0
-ENV MCP_SSE_PORT=8000
+RUN chown -R appuser:appuser /app
+
+USER appuser
 
 EXPOSE 8000
 
 # =========================
-# 8. Entrypoint (fixed + reliable)
+# 8. Healthcheck (FIXED)
 # =========================
-ENTRYPOINT ["bash", "-c", "Xvfb :99 -screen 0 1280x960x24 & exec python3 -m mcp_integration.server"]
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD curl -f http://localhost:8000/health || exit 1
+
+# =========================
+# 9. ENTRYPOINT
+# =========================
+CMD ["python3", "-m", "mcp_integration.server"]
