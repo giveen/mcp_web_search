@@ -126,6 +126,57 @@ async def list_tools() -> List[Tool]:
                 "required": ["url"],
             },
         ),
+        Tool(
+            name="google-search-and-browse",
+            description=(
+                "Perform a Google search then visit each of the top N result pages, "
+                "extracting distilled Markdown content and metadata from every page. "
+                "Returns a JSON bundle with an array of per-page results containing "
+                "rank, title, url, snippet (from Google), markdown, metadata "
+                "(title/url/extraction_method) and any per-page error. "
+                "Optionally saves the bundle to a JSON file. "
+                "Ideal for deep research: search → read → aggregate in one call."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query string.",
+                    },
+                    "limit": {
+                        "type": "number",
+                        "description": "Number of top search results to browse (default: 5, max: 10).",
+                        "default": 5,
+                    },
+                    "search_timeout": {
+                        "type": "number",
+                        "description": "Timeout for the initial Google search (ms, default: 30000).",
+                        "default": 30000,
+                    },
+                    "page_timeout": {
+                        "type": "number",
+                        "description": "Per-page navigation/extraction timeout (ms, default: 60000).",
+                        "default": 60000,
+                    },
+                    "basic_view": {
+                        "type": "boolean",
+                        "description": "Request Google Basic View (gbv=1) to reduce blocking.",
+                        "default": False,
+                    },
+                    "saveToFile": {
+                        "type": "boolean",
+                        "description": "Save the aggregated JSON bundle to disk.",
+                        "default": False,
+                    },
+                    "outputPath": {
+                        "type": "string",
+                        "description": "Directory (or file path) for the saved JSON bundle.",
+                    },
+                },
+                "required": ["query"],
+            },
+        ),
     ]
 
 
@@ -390,6 +441,154 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> Any:
                     _crawl_semaphore.release()
                 except Exception:
                     pass
+
+        elif name == "google-search-and-browse":
+            query = arguments.get("query", "")
+            limit = min(int(arguments.get("limit", 5)), 10)
+            search_timeout = int(arguments.get("search_timeout", 30000))
+            page_timeout = int(arguments.get("page_timeout", 60000))
+            basic_view = bool(arguments.get("basic_view", False))
+            save_to_file = bool(arguments.get("saveToFile", False))
+            output_path = arguments.get("outputPath")
+
+            if not query:
+                return [TextContent(type="text", text=json.dumps({"error": "query cannot be empty"}, ensure_ascii=False))]
+
+            if time.time() - _last_captcha_time < _captcha_cooldown_seconds:
+                return [TextContent(type="text", text=json.dumps({"error": {"reason": "cooldown", "message": "Cooldown after recent CAPTCHA"}}, ensure_ascii=False))]
+
+            logger.info(f"[google-search-and-browse] query={query!r}, limit={limit}")
+
+            # ── Step 1: run Google search ────────────────────────────────────
+            browser_manager = BrowserManager()
+            search_executor = SearchExecutor()
+            try:
+                async with browser_manager.get_page_context() as (context, page):
+                    search_result = await asyncio.wait_for(
+                        google_search(
+                            query,
+                            CommandOptions(limit=limit, timeout=search_timeout, basic_view=basic_view),
+                            existing_browser=context,  # type: ignore[arg-type]
+                        ),
+                        timeout=(search_timeout / 1000) + 10,
+                    )
+            except Exception as e:
+                logger.error(f"[google-search-and-browse] search failed: {e}")
+                return [TextContent(type="text", text=json.dumps({"error": str(e)}, ensure_ascii=False))]
+
+            try:
+                result_obj = asdict(search_result)
+            except Exception:
+                result_obj = search_result if isinstance(search_result, dict) else getattr(search_result, "__dict__", {})
+
+            raw_results = result_obj.get("results", [])
+            logger.info(f"[google-search-and-browse] got {len(raw_results)} search results, browsing up to {limit}")
+
+            # ── Step 2: visit each result page and distill ───────────────────
+            async def _distill_one(rank: int, item: dict) -> dict:
+                url = item.get("link", "")
+                title = item.get("title", "")
+                snippet = item.get("snippet", "")
+
+                if not url:
+                    return {"rank": rank, "title": title, "url": url, "snippet": snippet,
+                            "markdown": "", "metadata": {}, "error": "empty url"}
+
+                logger.info(f"[google-search-and-browse] [{rank}] distilling {url}")
+                await _crawl_semaphore.acquire()
+                try:
+                    domain = urlparse(url).netloc.lower()
+                    lock = _domain_locks.get(domain)
+                    if lock is None:
+                        lock = asyncio.Lock()
+                        _domain_locks[domain] = lock
+
+                    async with lock:
+                        last = _last_crawl_times.get(domain)
+                        now = time.time()
+                        if last and now - last < _POLITENESS_DELAY_SECONDS:
+                            to_wait = _POLITENESS_DELAY_SECONDS - (now - last)
+                            await asyncio.sleep(to_wait)
+                        _last_crawl_times[domain] = time.time()
+
+                    bm = BrowserManager()
+                    async with bm.get_page_context() as (ctx, pg):
+                        try:
+                            response = await pg.goto(url, timeout=page_timeout, wait_until="networkidle")
+                        except Exception as nav_e:
+                            logger.warning(f"[google-search-and-browse] [{rank}] navigation failed: {nav_e}")
+                            return {"rank": rank, "title": title, "url": url, "snippet": snippet,
+                                    "markdown": "", "metadata": {}, "error": f"navigation_failed: {nav_e}"}
+
+                        status = None
+                        try:
+                            status = response.status if response else None
+                        except Exception:
+                            pass
+                        if status and status >= 400:
+                            return {"rank": rank, "title": title, "url": url, "snippet": snippet,
+                                    "markdown": "", "metadata": {}, "error": f"http_{status}"}
+
+                        if search_executor.is_blocked_page(pg.url, response.url if response and getattr(response, "url", None) else ""):
+                            return {"rank": rank, "title": title, "url": url, "snippet": snippet,
+                                    "markdown": "", "metadata": {}, "error": "blocked_by_captcha"}
+
+                        try:
+                            distiller = ContentDistiller(context=ctx, page=pg)
+                            distill_result = await distiller.distill(url, query=query, basic_view=basic_view)
+                        except Exception as de:
+                            logger.warning(f"[google-search-and-browse] [{rank}] distill failed: {de}")
+                            return {"rank": rank, "title": title, "url": url, "snippet": snippet,
+                                    "markdown": "", "metadata": {}, "error": str(de)}
+
+                    return {
+                        "rank": rank,
+                        "title": title,
+                        "url": url,
+                        "snippet": snippet,
+                        "markdown": distill_result.get("markdown", ""),
+                        "metadata": {
+                            "title": distill_result.get("title", title),
+                            "url": distill_result.get("url", url),
+                            "extraction_method": distill_result.get("method", "fallback"),
+                        },
+                        "error": None,
+                    }
+                except Exception as e:
+                    logger.error(f"[google-search-and-browse] [{rank}] unexpected error: {e}")
+                    return {"rank": rank, "title": title, "url": url, "snippet": snippet,
+                            "markdown": "", "metadata": {}, "error": str(e)}
+                finally:
+                    _crawl_semaphore.release()
+
+            # Run page distillations sequentially to respect semaphore & politeness
+            page_results = []
+            for i, item in enumerate(raw_results[:limit], start=1):
+                page_results.append(await _distill_one(i, item))
+
+            # ── Step 3: assemble and optionally save ─────────────────────────
+            bundle = {
+                "query": query,
+                "total_browsed": len(page_results),
+                "results": page_results,
+            }
+
+            saved_path = None
+            if save_to_file:
+                out_dir = Path(output_path) if output_path else Path("mcp_html_output")
+                if out_dir.is_file():
+                    out_dir = out_dir.parent
+                out_dir.mkdir(parents=True, exist_ok=True)
+                ts = int(time.time())
+                safe_q = query[:40].replace(" ", "_").replace("/", "-")
+                file_path = out_dir / f"browse_{safe_q}-{ts}.json"
+                with open(file_path, "w", encoding="utf-8") as f:
+                    json.dump(bundle, f, ensure_ascii=False, indent=2)
+                saved_path = str(file_path)
+                logger.info(f"[google-search-and-browse] saved bundle to {saved_path}")
+
+            bundle["saved_path"] = saved_path
+            return [TextContent(type="text", text=json.dumps(bundle, ensure_ascii=False))]
 
         else:
             return [TextContent(type="text", text=f"未知工具: {name}")]
